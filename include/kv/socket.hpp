@@ -4,20 +4,41 @@
 namespace kv {
 
 /*
- * RAII wrapper around a TCP socket file descriptor.
- * Public interface for a socket abstraction.
- * TODO: Will later manage: file descriptor lifetime, move-only semantics, send / recv
+ * RAII wrapper for a POSIX TCP socket
+ *
+ * Owns the descriptor and closes it on destruction
+ * Move-only
  */
 class Socket {
 public:
-    Socket() = default;
-    ~Socket() = default;
+    // Constructs an invalid socket
+    Socket() noexcept;
 
+    // Takes ownership of an existing file descriptor
+    explicit Socket(int fd) noexcept;
+
+    // Closes the socket if valid
+    ~Socket();
+
+    // Non-copyable
     Socket(const Socket&) = delete;
     Socket& operator=(const Socket&) = delete;
 
-    Socket(Socket&&) noexcept = default;
-    Socket& operator=(Socket&&) noexcept = default;
+    // Movable
+    Socket(Socket&& other) noexcept;
+    Socket& operator=(Socket&& other) noexcept;
+
+    // Returns true if the socket owns a valid descriptor
+    bool valid() const noexcept;
+
+    // Returns the underlying file descriptor
+    int fd() const noexcept;
+
+    // Releases ownership without closing
+    int release() noexcept;
+
+private:
+    int fd_;
 };
 
 } // namespace kv
