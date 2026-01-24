@@ -38,6 +38,25 @@ void TcpServer::stop() {
     listen_socket_ = Socket{}; // destroy old socket, closes FD
 }
 
+Socket TcpServer::accept() {
+    if (!listening_)
+        throw std::runtime_error("Server is not listening");
+
+    sockaddr_in client_addr;
+    socklen_t client_len = sizeof(client_addr);
+    int client_fd = ::accept(
+        listen_socket_.fd(),
+        reinterpret_cast<sockaddr*>(&client_addr),
+        &client_len
+    );
+
+    if (client_fd == -1) {
+        throw std::runtime_error("accept() failed");
+    }
+
+    return Socket{client_fd};
+}
+
 bool TcpServer::is_listening() const noexcept {
     return listening_;
 }

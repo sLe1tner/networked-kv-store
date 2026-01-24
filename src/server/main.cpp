@@ -15,6 +15,7 @@ int main() {
     try {
         server.start(12345);
         std::cout << "Listening on port 12345\n";
+        kv::Socket client = server.accept();
         server.stop();
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << "\n";

@@ -28,6 +28,10 @@ public:
     // Stop listening (closes socket).
     void stop();
 
+    // Accept a new client connection.
+    // Blocks until a client connects.
+    Socket accept();
+
     // Returns true if the server is listening.
     bool is_listening() const noexcept;
 
