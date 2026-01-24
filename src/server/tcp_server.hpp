@@ -11,7 +11,7 @@ namespace kv {
 class TcpServer {
 public:
     TcpServer() = default;
-    explicit TcpServer(uint16_t port);
+    explicit TcpServer(uint16_t port) { start(port); };
 
     ~TcpServer() = default;
 
