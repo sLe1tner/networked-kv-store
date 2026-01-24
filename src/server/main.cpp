@@ -1,4 +1,6 @@
 
+#include "tcp_server.hpp"
+#include <iostream>
 
 
 /*
@@ -7,6 +9,14 @@
  * start server
  * block until shutdown
  */
+
 int main() {
-    return 0;
+    kv::TcpServer server;
+    try {
+        server.start(12345);
+        std::cout << "Listening on port 12345\n";
+        server.stop();
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << "\n";
+    }
 }
