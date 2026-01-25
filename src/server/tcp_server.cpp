@@ -80,21 +80,24 @@ bool TcpServer::is_listening() const noexcept {
 
 void TcpServer::handle_client(Connection &conn) {
     Protocol protocol;
-
     try {
         while (true) {
             std::string line = conn.read_line();
-
             try {
-                Command cmd = protocol.parse(line);
+                Command command = protocol.parse(line);
 
-                if (cmd.type == CommandType::Get) {
-                    conn.write(protocol.format_value("stub"));
-                } else if (cmd.type == CommandType::Set) {
-                    conn.write(protocol.format_ok());
-                } else {
-                    conn.write(protocol.format_ok());
-                }
+                std::visit([&](const auto& cmd) {
+                    using T = std::decay_t<decltype(cmd)>;
+
+                    if constexpr (std::is_same_v<T, Get>) {
+                        conn.write(protocol.format_value("stub"));
+                    } else if constexpr (std::is_same_v<T, Set>) {
+                        conn.write(protocol.format_ok());
+                    } else if constexpr (std::is_same_v<T, Del>) {
+                        conn.write(protocol.format_ok());
+                    }
+                }, command);
+
             } catch (const std::exception& e) {
                 conn.write(protocol.format_error(e.what()));
             }

@@ -3,20 +3,24 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <variant>
 
 namespace kv {
 
-enum class CommandType {
-    Get,
-    Set,
-    Del
+struct Get {
+    std::string key;
 };
 
-struct Command {
-    CommandType type;
+struct Set {
     std::string key;
     std::string value;
 };
+
+struct Del {
+    std::string key;
+};
+
+using Command = std::variant<Get, Set, Del>;
 
 /*
  * Parses and formats protocol messages.

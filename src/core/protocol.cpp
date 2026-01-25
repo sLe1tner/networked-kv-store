@@ -44,19 +44,14 @@ Command Protocol::parse_tokens(const std::vector<std::string_view>& tokens) cons
         if (tokens.size() != 2)
             throw std::runtime_error("GET requires exactly one argument");
 
-        return {
-            CommandType::Get,
-            std::string{tokens[1]},
-            {}
-        };
+        return Get{ std::string{tokens[1]} };
     }
 
     if (cmd == "SET") {
         if (tokens.size() != 3)
             throw std::runtime_error("SET requires exactly two arguments");
 
-        return {
-            CommandType::Set,
+        return Set{
             std::string{tokens[1]},
             std::string{tokens[2]}
         };
@@ -66,11 +61,7 @@ Command Protocol::parse_tokens(const std::vector<std::string_view>& tokens) cons
         if (tokens.size() != 2)
             throw std::runtime_error("DEL requires exactly one argument");
 
-        return {
-            CommandType::Del,
-            std::string{tokens[1]},
-            {}
-        };
+        return Del{ std::string{tokens[1]} };
     }
 
     throw std::runtime_error("unknown command");
