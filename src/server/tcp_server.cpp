@@ -1,10 +1,15 @@
 #include "tcp_server.hpp"
+#include "connection.hpp"
 
 #include <stdexcept>     // std::runtime_error
 #include <sys/socket.h>  // socket(), bind(), listen()
 #include <netinet/in.h>  // sockaddr_in
 #include <arpa/inet.h>   // htons()
 #include <unistd.h>      // close()
+
+#include <string>
+#include <string_view>
+#include <iostream>
 
 namespace kv {
 
@@ -17,6 +22,7 @@ void TcpServer::start(uint16_t port) {
     if (fd == -1)
         throw std::runtime_error("Failed to create socket");
 
+    port_ = port;
     listen_socket_ = Socket(fd);
 
     sockaddr_in addr{};
@@ -31,6 +37,16 @@ void TcpServer::start(uint16_t port) {
         throw std::runtime_error("Listen failed");
 
     listening_ = true;
+    accept_loop();
+}
+
+void TcpServer::accept_loop() {
+    while (listening_) {
+        Socket client = accept();
+        std::cout << "Listening on port " << port_ << "\n";
+        Connection client_connection{ std::move(client) };
+        handle_client(client_connection);
+    }
 }
 
 void TcpServer::stop() {
@@ -59,6 +75,20 @@ Socket TcpServer::accept() {
 
 bool TcpServer::is_listening() const noexcept {
     return listening_;
+}
+
+void TcpServer::handle_client(Connection &conn) {
+    try {
+        while (true) {
+            std::string line = conn.read_line();
+
+            std::string response = "+OK " + line + "\n";
+            conn.write(response);
+        }
+    } catch (const std::exception&) {
+        // Client disconnected or I/O error
+        // Connection will be closed via RAII
+    }
 }
 
 } // namespace kv

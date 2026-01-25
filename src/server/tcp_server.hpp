@@ -5,6 +5,8 @@
 
 namespace kv {
 
+class Connection;
+
 /*
  * TCP server skeleton.
  */
@@ -38,6 +40,10 @@ public:
 private:
     Socket listen_socket_;
     bool listening_ = false;
+    uint16_t port_ = 0;
+
+    void handle_client(Connection &conn);
+    void accept_loop();
 
 };
 
