@@ -1,9 +1,91 @@
 #include "kv/protocol.hpp"
+#include <stdexcept>
 
 namespace kv {
 
-std::string Protocol::handleCommand(const std::string& input) {
-    return "ERROR not implemented\n";
+
+Command Protocol::parse(std::string_view line) const {
+    // CRLF tolerance (windows, telnet, netcat)
+    if (!line.empty() && line.back() == '\r') {
+        line.remove_suffix(1);
+    }
+
+    std::vector<std::string_view> tokens;
+    tokens.reserve(3);
+
+    size_t pos = 0;
+
+    while (pos < line.size()) {
+        // Skip spaces
+        while (pos < line.size() && line[pos] == ' ')
+            ++pos;
+
+        if (pos >= line.size())
+            break;
+
+        size_t start = pos;
+        while (pos < line.size() && line[pos] != ' ')
+            ++pos;
+
+        tokens.emplace_back(line.substr(start, pos - start));
+    }
+
+    if (tokens.empty()) {
+        throw std::runtime_error("empty command");
+    }
+
+    return parse_tokens(tokens);
+}
+
+Command Protocol::parse_tokens(const std::vector<std::string_view>& tokens) const {
+    const auto& cmd = tokens[0];
+
+    if (cmd == "GET") {
+        if (tokens.size() != 2)
+            throw std::runtime_error("GET requires exactly one argument");
+
+        return {
+            CommandType::Get,
+            std::string{tokens[1]},
+            {}
+        };
+    }
+
+    if (cmd == "SET") {
+        if (tokens.size() != 3)
+            throw std::runtime_error("SET requires exactly two arguments");
+
+        return {
+            CommandType::Set,
+            std::string{tokens[1]},
+            std::string{tokens[2]}
+        };
+    }
+
+    if (cmd == "DEL") {
+        if (tokens.size() != 2)
+            throw std::runtime_error("DEL requires exactly one argument");
+
+        return {
+            CommandType::Del,
+            std::string{tokens[1]},
+            {}
+        };
+    }
+
+    throw std::runtime_error("unknown command");
+}
+
+std::string Protocol::format_ok() const {
+    return "+OK\n";
+}
+
+std::string Protocol::format_error(std::string_view message) const {
+    return "-ERR " + std::string{message} + "\n";
+}
+
+std::string Protocol::format_value(std::string_view value) const {
+    return "$" + std::string{value} + "\n";
 }
 
 } // namespace kv

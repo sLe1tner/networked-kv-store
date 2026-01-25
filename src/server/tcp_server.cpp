@@ -1,5 +1,6 @@
 #include "tcp_server.hpp"
 #include "connection.hpp"
+#include "kv/protocol.hpp"
 
 #include <stdexcept>     // std::runtime_error
 #include <sys/socket.h>  // socket(), bind(), listen()
@@ -78,12 +79,25 @@ bool TcpServer::is_listening() const noexcept {
 }
 
 void TcpServer::handle_client(Connection &conn) {
+    Protocol protocol;
+
     try {
         while (true) {
             std::string line = conn.read_line();
 
-            std::string response = "+OK " + line + "\n";
-            conn.write(response);
+            try {
+                Command cmd = protocol.parse(line);
+
+                if (cmd.type == CommandType::Get) {
+                    conn.write(protocol.format_value("stub"));
+                } else if (cmd.type == CommandType::Set) {
+                    conn.write(protocol.format_ok());
+                } else {
+                    conn.write(protocol.format_ok());
+                }
+            } catch (const std::exception& e) {
+                conn.write(protocol.format_error(e.what()));
+            }
         }
     } catch (const std::exception&) {
         // Client disconnected or I/O error
