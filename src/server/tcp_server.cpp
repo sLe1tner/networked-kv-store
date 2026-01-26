@@ -15,7 +15,7 @@
 namespace kv {
 
 
-void TcpServer::start(uint16_t port) {
+void TcpServer::start() {
     if (listening_)
         throw std::runtime_error("Server is already listening");
 
@@ -23,13 +23,12 @@ void TcpServer::start(uint16_t port) {
     if (fd == -1)
         throw std::runtime_error("Failed to create socket");
 
-    port_ = port;
     listen_socket_ = Socket(fd);
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
-    addr.sin_port = htons(port); // Converts port to network byte order
+    addr.sin_port = htons(port_); // Converts port to network byte order
 
     if (::bind(listen_socket_.fd(), reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == -1)
         throw std::runtime_error("Bind failed");

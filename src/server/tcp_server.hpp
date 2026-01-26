@@ -1,6 +1,7 @@
 #pragma once
 
 #include "kv/socket.hpp"
+#include "kv/kv_store.hpp"
 #include <cstdint>
 
 namespace kv {
@@ -12,8 +13,7 @@ class Connection;
  */
 class TcpServer {
 public:
-    TcpServer() = default;
-    explicit TcpServer(uint16_t port) { start(port); };
+    explicit TcpServer(uint16_t port) : port_(port) {};
 
     ~TcpServer() = default;
 
@@ -25,7 +25,7 @@ public:
 
     // Bind to the given port and start listening.
     // Throws std::runtime_error on failure.
-    void start(uint16_t port);
+    void start();
 
     // Stop listening (closes socket).
     void stop();

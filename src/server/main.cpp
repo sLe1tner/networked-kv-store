@@ -12,9 +12,9 @@
  */
 
 int main() {
-    kv::TcpServer server;
+    kv::TcpServer server{12345};
     try {
-        server.start(12345);
+        server.start();
         server.stop();
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << "\n";
