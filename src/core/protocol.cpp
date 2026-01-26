@@ -4,7 +4,7 @@
 namespace kv {
 
 
-Command Protocol::parse(std::string_view line) const {
+Command Protocol::parse(std::string_view line) {
     // CRLF tolerance (windows, telnet, netcat)
     if (!line.empty() && line.back() == '\r') {
         line.remove_suffix(1);
@@ -37,7 +37,7 @@ Command Protocol::parse(std::string_view line) const {
     return parse_tokens(tokens);
 }
 
-Command Protocol::parse_tokens(const std::vector<std::string_view>& tokens) const {
+Command Protocol::parse_tokens(const std::vector<std::string_view>& tokens) {
     const auto& cmd = tokens[0];
 
     if (cmd == "GET") {
@@ -67,15 +67,15 @@ Command Protocol::parse_tokens(const std::vector<std::string_view>& tokens) cons
     throw std::runtime_error("unknown command");
 }
 
-std::string Protocol::format_ok() const {
+std::string Protocol::format_ok() {
     return "+OK\n";
 }
 
-std::string Protocol::format_error(std::string_view message) const {
+std::string Protocol::format_error(std::string_view message) {
     return "-ERR " + std::string{message} + "\n";
 }
 
-std::string Protocol::format_value(std::string_view value) const {
+std::string Protocol::format_value(std::string_view value) {
     return "$" + std::string{value} + "\n";
 }
 

@@ -29,14 +29,14 @@ using Command = std::variant<Get, Set, Del>;
  */
 class Protocol {
 public:
-    Command parse(std::string_view line) const;
+    static Command parse(std::string_view line);
 
-    std::string format_ok() const;
-    std::string format_error(std::string_view message) const;
-    std::string format_value(std::string_view value) const;
+    static std::string format_ok();
+    static std::string format_error(std::string_view message);
+    static std::string format_value(std::string_view value);
 
 private:
-    Command parse_tokens(const std::vector<std::string_view>& tokens) const;
+    static Command parse_tokens(const std::vector<std::string_view>& tokens);
 };
 
 } // namespace kv
