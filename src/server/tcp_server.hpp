@@ -39,8 +39,9 @@ public:
 
 private:
     Socket listen_socket_;
-    bool listening_ = false;
-    uint16_t port_ = 0;
+    bool listening_{false};
+    uint16_t port_{0};
+    KvStore store_;
 
     void handle_client(Connection &conn);
     void accept_loop();

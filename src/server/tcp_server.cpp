@@ -88,11 +88,20 @@ void TcpServer::handle_client(Connection &conn) {
                     using T = std::decay_t<decltype(cmd)>;
 
                     if constexpr (std::is_same_v<T, Get>) {
-                        conn.write(Protocol::format_value("stub"));
+                        auto value = store_.get(cmd.key);
+                        conn.write(value ?
+                            Protocol::format_value(*value) :
+                            Protocol::format_error("key not found")
+                        );
                     } else if constexpr (std::is_same_v<T, Set>) {
+                        store_.set(cmd.key, cmd.value);
                         conn.write(Protocol::format_ok());
                     } else if constexpr (std::is_same_v<T, Del>) {
-                        conn.write(Protocol::format_ok());
+                        bool success = store_.del(cmd.key);
+                        conn.write(success ?
+                            Protocol::format_ok() :
+                            Protocol::format_error("key not found")
+                        );
                     }
                 }, command);
 
