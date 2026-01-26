@@ -31,7 +31,7 @@ Command Protocol::parse(std::string_view line) {
     }
 
     if (tokens.empty()) {
-        throw std::runtime_error("empty command");
+        throw ProtocolError{"empty command"};
     }
 
     return parse_tokens(tokens);
@@ -42,14 +42,14 @@ Command Protocol::parse_tokens(const std::vector<std::string_view>& tokens) {
 
     if (cmd == "GET") {
         if (tokens.size() != 2)
-            throw std::runtime_error("GET requires exactly one argument");
+            throw ProtocolError{"GET requires exactly one argument"};
 
         return Get{ std::string{tokens[1]} };
     }
 
     if (cmd == "SET") {
         if (tokens.size() != 3)
-            throw std::runtime_error("SET requires exactly two arguments");
+            throw ProtocolError{"SET requires exactly two arguments"};
 
         return Set{
             std::string{tokens[1]},
@@ -59,12 +59,12 @@ Command Protocol::parse_tokens(const std::vector<std::string_view>& tokens) {
 
     if (cmd == "DEL") {
         if (tokens.size() != 2)
-            throw std::runtime_error("DEL requires exactly one argument");
+            throw ProtocolError{"DEL requires exactly one argument"};
 
         return Del{ std::string{tokens[1]} };
     }
 
-    throw std::runtime_error("unknown command");
+    throw ProtocolError{"unknown command"};
 }
 
 std::string Protocol::format_ok() {

@@ -2,6 +2,7 @@ add_library(kv_core
     kv_store.cpp
     protocol.cpp
     socket.cpp
+    command_dispatcher.cpp
 )
 
 target_include_directories(kv_core

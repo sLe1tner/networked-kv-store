@@ -3,8 +3,14 @@
 #include "kv/socket.hpp"
 #include <string>
 #include <string_view>
+#include <stdexcept>
 
 namespace kv {
+
+class IOError : public std::runtime_error {
+public:
+    explicit IOError(const std::string& msg) : std::runtime_error(msg) {}
+};
 
 /*
  * Represents a single client connection.

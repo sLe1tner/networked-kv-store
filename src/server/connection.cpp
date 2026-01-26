@@ -1,6 +1,5 @@
 #include "connection.hpp"
 #include <unistd.h>
-#include <stdexcept>
 
 namespace kv {
 
@@ -12,10 +11,10 @@ std::string Connection::read_line() {
         ssize_t n = ::read(socket_.fd(), &ch, 1);
 
         if (n == 0)
-            throw std::runtime_error("client disconnected");
+            throw IOError{"client disconnected"};
 
         if (n < 0)
-            throw std::runtime_error("read failed");
+            throw IOError{"read failed"};
 
         if (ch == '\n')
             break;
@@ -33,7 +32,7 @@ void Connection::write(std::string_view data) {
         ssize_t n = ::write(socket_.fd(), buf, remaining);
 
         if (n < 0) {
-            throw std::runtime_error("write failed");
+            throw IOError{"write failed"};
         }
 
         buf += n;

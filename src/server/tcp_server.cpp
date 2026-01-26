@@ -1,6 +1,7 @@
 #include "tcp_server.hpp"
 #include "connection.hpp"
 #include "kv/protocol.hpp"
+#include "kv/command_dispatcher.hpp"
 
 #include <stdexcept>     // std::runtime_error
 #include <sys/socket.h>  // socket(), bind(), listen()
@@ -43,7 +44,7 @@ void TcpServer::start() {
 void TcpServer::accept_loop() {
     while (listening_) {
         Socket client = accept();
-        std::cout << "Listening on port " << port_ << "\n";
+        std::cout << "Client connected on port " << port_ << "\n";
         Connection client_connection{ std::move(client) };
         handle_client(client_connection);
     }
@@ -77,41 +78,18 @@ bool TcpServer::is_listening() const noexcept {
     return listening_;
 }
 
-void TcpServer::handle_client(Connection &conn) {
-    try {
-        while (true) {
-            std::string line = conn.read_line();
-            try {
-                Command command = Protocol::parse(line);
-
-                std::visit([&](const auto& cmd) {
-                    using T = std::decay_t<decltype(cmd)>;
-
-                    if constexpr (std::is_same_v<T, Get>) {
-                        auto value = store_.get(cmd.key);
-                        conn.write(value ?
-                            Protocol::format_value(*value) :
-                            Protocol::format_error("key not found")
-                        );
-                    } else if constexpr (std::is_same_v<T, Set>) {
-                        store_.set(cmd.key, cmd.value);
-                        conn.write(Protocol::format_ok());
-                    } else if constexpr (std::is_same_v<T, Del>) {
-                        bool success = store_.del(cmd.key);
-                        conn.write(success ?
-                            Protocol::format_ok() :
-                            Protocol::format_error("key not found")
-                        );
-                    }
-                }, command);
-
-            } catch (const std::exception& e) {
-                conn.write(Protocol::format_error(e.what()));
-            }
+void TcpServer::handle_client(Connection &connection) {
+    while (true) {
+        try {
+            std::string line = connection.read_line();
+            Command command = Protocol::parse(line);
+            std::string response = CommandDispatcher::execute(command, store_);
+            connection.write(response);
+        } catch (const ProtocolError& e) {
+            connection.write(Protocol::format_error(e.what()));
+        } catch (const IOError& ) {
+            break; // Client disconnected or I/O failure
         }
-    } catch (const std::exception&) {
-        // Client disconnected or I/O error
-        // Connection will be closed via RAII
     }
 }
 
