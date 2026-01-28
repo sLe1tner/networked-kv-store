@@ -31,34 +31,57 @@ void TcpServer::start() {
     addr.sin_addr.s_addr = INADDR_ANY;
     addr.sin_port = htons(port_); // Converts port to network byte order
 
+    int opt = 1;
+    setsockopt(listen_socket_.fd(), SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
     if (::bind(listen_socket_.fd(), reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == -1)
         throw std::runtime_error("Bind failed");
 
     if (::listen(listen_socket_.fd(), SOMAXCONN) == -1)
         throw std::runtime_error("Listen failed");
 
+    running_ = true;
+    setup_workers();
     listening_ = true;
     accept_loop();
 }
 
 void TcpServer::accept_loop() {
     while (listening_) {
-        Socket client = accept();
+        auto client = accept();
+        if (!client)
+            break; // server shutting down
         std::cout << "Client connected on port " << port_ << "\n";
-        Connection client_connection{ std::move(client) };
-        handle_client(client_connection);
+
+        // std::function requires its callable to be copy-constructible, which Socket is not.
+        // So I'm using shared_ptr here as a "copyable ownership token".
+        // In C++23 std::function can be std::move_only_function instead.
+        auto client_connection = std::make_shared<Connection>(std::move(*client));
+        submit_task([this, client_connection]() mutable {
+            handle_client(*client_connection);
+        });
     }
 }
 
 void TcpServer::stop() {
+    if (!listening_ && !running_)
+        return;
+
+    // stop accepting new clients
     listening_ = false;
-    listen_socket_ = Socket{}; // destroy old socket, closes FD
+    if (listen_socket_.valid())
+        listen_socket_ = Socket{}; // destroy old socket, closes FD
+
+    running_ = false;
+    cv_.notify_all();
+
+    for (auto& t : workers_) {
+        if (t.joinable())
+            t.join();
+    }
 }
 
-Socket TcpServer::accept() {
-    if (!listening_)
-        throw std::runtime_error("Server is not listening");
-
+std::optional<Socket> TcpServer::accept() {
     sockaddr_in client_addr;
     socklen_t client_len = sizeof(client_addr);
     int client_fd = ::accept(
@@ -68,6 +91,8 @@ Socket TcpServer::accept() {
     );
 
     if (client_fd == -1) {
+        if (!listening_)
+            return std::nullopt; // expected shutdown
         throw std::runtime_error("accept() failed");
     }
 
@@ -87,10 +112,49 @@ void TcpServer::handle_client(Connection &connection) {
             connection.write(response);
         } catch (const ProtocolError& e) {
             connection.write(Protocol::format_error(e.what()));
-        } catch (const IOError& ) {
+        } catch (const IOError&) {
             break; // Client disconnected or I/O failure
         }
     }
+}
+
+void TcpServer::worker_loop() {
+    while(true) {
+        std::function<void()> task;
+
+        {
+            std::unique_lock lock(tasks_mutex_);
+            cv_.wait(lock, [this] {
+                return !tasks_.empty() || !running_;
+            });
+
+            if (!running_ && tasks_.empty())
+                return;
+
+            if (tasks_.empty())
+                continue;
+
+            task = std::move(tasks_.front());
+            tasks_.pop_front();
+        }
+        task();
+    }
+}
+
+void TcpServer::setup_workers() {
+    for (size_t i = 0; i < num_workers_; i++) {
+        workers_.emplace_back([this] {
+            worker_loop();
+        });
+    }
+}
+
+void TcpServer::submit_task(std::function<void()> task) {
+    {
+        std::unique_lock lock(tasks_mutex_);
+        tasks_.push_back(std::move(task));
+    }
+    cv_.notify_one();
 }
 
 } // namespace kv

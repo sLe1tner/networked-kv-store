@@ -3,6 +3,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <shared_mutex>
 
 
 namespace kv {
@@ -21,6 +22,7 @@ public:
 
 private:
     std::unordered_map<std::string, std::string> data_;
+    mutable std::shared_mutex mutex_;
 };
 
 } // namespace kv
