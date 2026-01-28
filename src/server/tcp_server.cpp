@@ -64,7 +64,7 @@ void TcpServer::accept_loop() {
 }
 
 void TcpServer::stop() {
-    if (!listening_ && !running_)
+    if (!listening_)
         return;
 
     // stop accepting new clients
@@ -72,7 +72,13 @@ void TcpServer::stop() {
     if (listen_socket_.valid())
         listen_socket_ = Socket{}; // destroy old socket, closes FD
 
-    running_ = false;
+    // Push a poison pill for each worker
+    {
+        std::lock_guard lock(tasks_mutex_);
+        for (size_t i = 0; i < num_workers_; ++i) {
+            tasks_.push_back(POISON_PILL);
+        }
+    }
     cv_.notify_all();
 
     for (auto& t : workers_) {
@@ -121,22 +127,18 @@ void TcpServer::handle_client(Connection &connection) {
 void TcpServer::worker_loop() {
     while(true) {
         std::function<void()> task;
-
         {
             std::unique_lock lock(tasks_mutex_);
-            cv_.wait(lock, [this] {
-                return !tasks_.empty() || !running_;
-            });
-
-            if (!running_ && tasks_.empty())
-                return;
-
-            if (tasks_.empty())
-                continue;
+            cv_.wait(lock, [this] { return !tasks_.empty(); });
 
             task = std::move(tasks_.front());
             tasks_.pop_front();
         }
+
+        // Poison pill check
+        if (!task)
+            break; // Exit the loop and kill the thread
+
         task();
     }
 }

@@ -58,6 +58,7 @@ private:
     std::mutex tasks_mutex_;
     std::condition_variable cv_;
     std::atomic<bool> running_{false};
+    inline static const std::function<void()> POISON_PILL{nullptr};
 
     void worker_loop();
     void setup_workers();
