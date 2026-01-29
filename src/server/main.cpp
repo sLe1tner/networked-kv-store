@@ -15,7 +15,6 @@ int main() {
     kv::TcpServer server{12345};
     try {
         server.start();
-        server.stop();
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << "\n";
     }

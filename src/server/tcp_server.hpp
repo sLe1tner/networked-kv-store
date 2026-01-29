@@ -2,6 +2,7 @@
 
 #include "kv/socket.hpp"
 #include "kv/kv_store.hpp"
+#include "waker.hpp"
 #include <cstdint>
 #include <thread>
 #include <deque>
@@ -52,21 +53,27 @@ private:
     uint16_t port_{0};
     KvStore store_;
 
+    void handle_client(Connection &conn);
+    void accept_loop();
+
+    // thread pool
     size_t num_workers_{5};
     std::deque<std::function<void()>> tasks_{};
     std::vector<std::thread> workers_;
     std::mutex tasks_mutex_;
     std::condition_variable cv_;
-    std::atomic<bool> running_{false};
     inline static const std::function<void()> POISON_PILL{nullptr};
-
     void worker_loop();
     void setup_workers();
     void submit_task(std::function<void()> task);
 
-
-    void handle_client(Connection &conn);
-    void accept_loop();
+    // waker
+    Waker waker_;
+    inline static Waker* s_instance_waker = nullptr;
+    static void signal_handler(int) {
+        if (s_instance_waker)
+            s_instance_waker->notify();
+    }
 
 };
 

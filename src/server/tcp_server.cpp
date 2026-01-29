@@ -12,6 +12,8 @@
 #include <string>
 #include <string_view>
 #include <iostream>
+#include <csignal>
+#include <poll.h>
 
 namespace kv {
 
@@ -40,26 +42,56 @@ void TcpServer::start() {
     if (::listen(listen_socket_.fd(), SOMAXCONN) == -1)
         throw std::runtime_error("Listen failed");
 
-    running_ = true;
-    setup_workers();
     listening_ = true;
+    setup_workers();
     accept_loop();
+    stop();
 }
 
 void TcpServer::accept_loop() {
-    while (listening_) {
-        auto client = accept();
-        if (!client)
-            break; // server shutting down
-        std::cout << "Client connected on port " << port_ << "\n";
+    // Register the signal handler (SIGINT)
+    s_instance_waker = &waker_;
+    std::signal(SIGINT, signal_handler);
 
-        // std::function requires its callable to be copy-constructible, which Socket is not.
-        // So I'm using shared_ptr here as a "copyable ownership token".
-        // In C++23 std::function can be std::move_only_function instead.
-        auto client_connection = std::make_shared<Connection>(std::move(*client));
-        submit_task([this, client_connection]() mutable {
-            handle_client(*client_connection);
-        });
+    struct pollfd fds[2];
+    fds[0].fd = listen_socket_.fd(); // The server listening socket
+    fds[0].events = POLLIN;
+
+    fds[1].fd = waker_.read_fd(); // The read-end of the self-pipe
+    fds[1].events = POLLIN;
+
+    while (listening_) {
+        int activity = poll(fds, 2, -1); // Block until either FD is ready
+
+        if (activity < 0) {
+            if (errno == EINTR) // interrupted syscall, eg: SIGWINCH or SIGCONT
+                continue;
+            break;
+        }
+
+        // Check if we were interrupted by the self-pipe
+        if (fds[1].revents & POLLIN) {
+            if (listen_socket_.valid())
+                listen_socket_ = Socket{};
+            waker_.clear();
+            break;
+        }
+
+        // Check if there's a new connection
+        if (fds[0].revents & POLLIN) {
+            auto client = accept();
+            if (!client)
+                break;
+            std::cout << "Client connected on port " << port_ << "\n";
+
+            // std::function requires its callable to be copy-constructible, which Socket is not.
+            // So I'm using shared_ptr here as a "copyable ownership token".
+            // In C++23 std::function can be std::move_only_function instead.
+            auto client_connection = std::make_shared<Connection>(std::move(*client));
+            submit_task([this, client_connection]() mutable {
+                handle_client(*client_connection);
+            });
+        }
     }
 }
 
@@ -154,6 +186,8 @@ void TcpServer::setup_workers() {
 void TcpServer::submit_task(std::function<void()> task) {
     {
         std::unique_lock lock(tasks_mutex_);
+        if (!listening_)
+            return;
         tasks_.push_back(std::move(task));
     }
     cv_.notify_one();
