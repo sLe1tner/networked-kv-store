@@ -3,6 +3,10 @@
 #include "kv/socket.hpp"
 #include "kv/kv_store.hpp"
 #include "waker.hpp"
+#include "kv/task_deque.hpp"
+#include "kv/protocol.hpp"
+#include "kv/command_dispatcher.hpp"
+#include "connection.hpp"
 #include <cstdint>
 #include <thread>
 #include <deque>
@@ -12,10 +16,20 @@
 #include <condition_variable>
 #include <optional>
 #include <atomic>
+#include <poll.h>
+#include <map>
 
 namespace kv {
 
-class Connection;
+
+struct Task {
+    std::shared_ptr<Connection> connection;
+    Command cmd;
+    void execute(KvStore& store) {
+        std::string response = CommandDispatcher::execute(cmd, store);
+        connection->write(response);
+    };
+};
 
 /*
  * TCP server skeleton.
@@ -48,10 +62,10 @@ public:
     bool is_listening() const noexcept;
 
 private:
+    KvStore store_;
     Socket listen_socket_;
     std::atomic<bool> listening_{false};
     uint16_t port_{0};
-    KvStore store_;
 
     void handle_client(Connection &conn);
     void accept_loop();
@@ -59,13 +73,12 @@ private:
     // thread pool
     size_t num_workers_{5};
     std::deque<std::function<void()>> tasks_{};
-    std::vector<std::thread> workers_;
-    std::mutex tasks_mutex_;
-    std::condition_variable cv_;
-    inline static const std::function<void()> POISON_PILL{nullptr};
-    void worker_loop();
+    TaskDeque<Task> task_deque_;
+    std::vector<std::jthread> workers_;
+    std::vector<pollfd> poll_fds_;
+    std::map<int, std::shared_ptr<Connection>> clients_; // fd -> connection map
     void setup_workers();
-    void submit_task(std::function<void()> task);
+    void worker_loop(std::stop_token stop_token);
 
     // waker
     Waker waker_;

@@ -1,7 +1,4 @@
 #include "tcp_server.hpp"
-#include "connection.hpp"
-#include "kv/protocol.hpp"
-#include "kv/command_dispatcher.hpp"
 
 #include <stdexcept>     // std::runtime_error
 #include <sys/socket.h>  // socket(), bind(), listen()
@@ -13,7 +10,6 @@
 #include <string_view>
 #include <iostream>
 #include <csignal>
-#include <poll.h>
 
 namespace kv {
 
@@ -49,19 +45,17 @@ void TcpServer::start() {
 }
 
 void TcpServer::accept_loop() {
+    std::signal(SIGPIPE, SIG_IGN); // ignore SIGPIPE
+
     // Register the signal handler (SIGINT)
     s_instance_waker = &waker_;
     std::signal(SIGINT, signal_handler);
 
-    struct pollfd fds[2];
-    fds[0].fd = listen_socket_.fd(); // The server listening socket
-    fds[0].events = POLLIN;
-
-    fds[1].fd = waker_.read_fd(); // The read-end of the self-pipe
-    fds[1].events = POLLIN;
+    poll_fds_.push_back({listen_socket_.fd(), POLLIN, 0}); // The server listening socket
+    poll_fds_.push_back({waker_.read_fd(), POLLIN, 0}); // The read-end of the self-pipe
 
     while (listening_) {
-        int activity = poll(fds, 2, -1); // Block until either FD is ready
+        int activity = poll(poll_fds_.data(), poll_fds_.size(), -1); // Block until a FD is ready
 
         if (activity < 0) {
             if (errno == EINTR) // interrupted syscall, eg: SIGWINCH or SIGCONT
@@ -69,28 +63,50 @@ void TcpServer::accept_loop() {
             break;
         }
 
-        // Check if we were interrupted by the self-pipe
-        if (fds[1].revents & POLLIN) {
-            if (listen_socket_.valid())
-                listen_socket_ = Socket{};
-            waker_.clear();
-            break;
-        }
+        for (size_t i = 0; i < poll_fds_.size(); i++) {
+            if (!poll_fds_[i].revents & POLLIN)
+                continue;
 
-        // Check if there's a new connection
-        if (fds[0].revents & POLLIN) {
-            auto client = accept();
-            if (!client)
-                break;
-            std::cout << "Client connected on port " << port_ << "\n";
+            if (poll_fds_[i].fd == waker_.read_fd()) { // SIGINT
+                if (listen_socket_.valid())
+                    listen_socket_ = Socket{};
+                waker_.clear();
+                for (auto& worker : workers_)
+                    worker.request_stop(); // Signals the stop_token inside the worker loop
+                return;
 
-            // std::function requires its callable to be copy-constructible, which Socket is not.
-            // So I'm using shared_ptr here as a "copyable ownership token".
-            // In C++23 std::function can be std::move_only_function instead.
-            auto client_connection = std::make_shared<Connection>(std::move(*client));
-            submit_task([this, client_connection]() mutable {
-                handle_client(*client_connection);
-            });
+            } else if (poll_fds_[i].fd == listen_socket_.fd()) { // New client
+                auto client = accept();
+                if (!client)
+                    break;
+                std::cout << "Client connected on port " << port_ << "\n";
+                int current_fd = client->fd();
+                poll_fds_.push_back({current_fd, POLLIN, 0});
+                clients_[current_fd] = std::make_shared<Connection>(std::move(*client));
+
+            } else { // Command
+                auto client_connection = clients_[poll_fds_[i].fd];
+                Command command;
+
+                try { // Parse
+                    std::string line = client_connection->read_line();
+                    command = Protocol::parse(line);
+
+                } catch (const ProtocolError& e) { // Typo etc
+                    client_connection->write(Protocol::format_error(e.what()));
+                    continue;
+
+                } catch (const IOError& e) { // Connection/IO problem
+                    std::cout << e.what() << "\n";
+
+                    // swap & pop to remove dead connection in O(1)
+                    std::swap(poll_fds_[i], poll_fds_.back());
+                    poll_fds_.pop_back();
+                    i--;
+                    continue;
+                }
+                task_deque_.push_back(Task{client_connection, command});
+            }
         }
     }
 }
@@ -104,19 +120,7 @@ void TcpServer::stop() {
     if (listen_socket_.valid())
         listen_socket_ = Socket{}; // destroy old socket, closes FD
 
-    // Push a poison pill for each worker
-    {
-        std::lock_guard lock(tasks_mutex_);
-        for (size_t i = 0; i < num_workers_; ++i) {
-            tasks_.push_back(POISON_PILL);
-        }
-    }
-    cv_.notify_all();
-
-    for (auto& t : workers_) {
-        if (t.joinable())
-            t.join();
-    }
+    workers_.clear(); // jthread auto cleanup
 }
 
 std::optional<Socket> TcpServer::accept() {
@@ -141,56 +145,28 @@ bool TcpServer::is_listening() const noexcept {
     return listening_;
 }
 
-void TcpServer::handle_client(Connection &connection) {
-    while (true) {
-        try {
-            std::string line = connection.read_line();
-            Command command = Protocol::parse(line);
-            std::string response = CommandDispatcher::execute(command, store_);
-            connection.write(response);
-        } catch (const ProtocolError& e) {
-            connection.write(Protocol::format_error(e.what()));
-        } catch (const IOError&) {
-            break; // Client disconnected or I/O failure
+void TcpServer::worker_loop(std::stop_token stop_token) {
+    while(!stop_token.stop_requested()) {
+        auto task = task_deque_.wait_and_pop_front(stop_token);
+        if (task) {
+            try {
+                task->execute(store_);
+            } catch (const IOError& e) {
+                std::cout << e.what() << "\n";
+                continue;
+            }
+
         }
-    }
-}
-
-void TcpServer::worker_loop() {
-    while(true) {
-        std::function<void()> task;
-        {
-            std::unique_lock lock(tasks_mutex_);
-            cv_.wait(lock, [this] { return !tasks_.empty(); });
-
-            task = std::move(tasks_.front());
-            tasks_.pop_front();
-        }
-
-        // Poison pill check
-        if (!task)
-            break; // Exit the loop and kill the thread
-
-        task();
     }
 }
 
 void TcpServer::setup_workers() {
     for (size_t i = 0; i < num_workers_; i++) {
-        workers_.emplace_back([this] {
-            worker_loop();
+        workers_.emplace_back([this](std::stop_token stop_token) {
+            worker_loop(stop_token);
         });
     }
 }
 
-void TcpServer::submit_task(std::function<void()> task) {
-    {
-        std::unique_lock lock(tasks_mutex_);
-        if (!listening_)
-            return;
-        tasks_.push_back(std::move(task));
-    }
-    cv_.notify_one();
-}
 
 } // namespace kv
