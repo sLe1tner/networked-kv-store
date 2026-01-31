@@ -38,13 +38,6 @@ void TcpServer::start() {
     if (::listen(listen_socket_.fd(), SOMAXCONN) == -1)
         throw std::runtime_error("Listen failed");
 
-    listening_ = true;
-    setup_workers();
-    accept_loop();
-    stop();
-}
-
-void TcpServer::accept_loop() {
     std::signal(SIGPIPE, SIG_IGN); // ignore SIGPIPE
 
     // Register the signal handler (SIGINT)
@@ -53,7 +46,14 @@ void TcpServer::accept_loop() {
 
     poll_fds_.push_back({listen_socket_.fd(), POLLIN, 0}); // The server listening socket
     poll_fds_.push_back({waker_.read_fd(), POLLIN, 0}); // The read-end of the self-pipe
+    listening_ = true;
 
+    setup_workers();
+    run_reactor();
+    stop();
+}
+
+void TcpServer::run_reactor() {
     while (listening_) {
         int activity = poll(poll_fds_.data(), poll_fds_.size(), -1); // Block until a FD is ready
 
@@ -64,51 +64,50 @@ void TcpServer::accept_loop() {
         }
 
         for (size_t i = 0; i < poll_fds_.size(); i++) {
-            if (!poll_fds_[i].revents & POLLIN)
+            if (!poll_fds_[i].revents & POLLIN) // Nothing on that fd
                 continue;
-
             if (poll_fds_[i].fd == waker_.read_fd()) { // SIGINT
-                if (listen_socket_.valid())
-                    listen_socket_ = Socket{};
                 waker_.clear();
-                for (auto& worker : workers_)
-                    worker.request_stop(); // Signals the stop_token inside the worker loop
                 return;
-
-            } else if (poll_fds_[i].fd == listen_socket_.fd()) { // New client
-                auto client = accept();
-                if (!client)
-                    break;
-                std::cout << "Client connected on port " << port_ << "\n";
-                int current_fd = client->fd();
-                poll_fds_.push_back({current_fd, POLLIN, 0});
-                clients_[current_fd] = std::make_shared<Connection>(std::move(*client));
-
-            } else { // Command
-                auto client_connection = clients_[poll_fds_[i].fd];
-                Command command;
-
-                try { // Parse
-                    std::string line = client_connection->read_line();
-                    command = Protocol::parse(line);
-
-                } catch (const ProtocolError& e) { // Typo etc
-                    client_connection->write(Protocol::format_error(e.what()));
-                    continue;
-
-                } catch (const IOError& e) { // Connection/IO problem
-                    std::cout << e.what() << "\n";
-
-                    // swap & pop to remove dead connection in O(1)
-                    std::swap(poll_fds_[i], poll_fds_.back());
-                    poll_fds_.pop_back();
-                    i--;
-                    continue;
-                }
-                task_deque_.push_back(Task{client_connection, command});
+            } else if (poll_fds_[i].fd == listen_socket_.fd()) {
+                handle_new_connection();
+            } else {
+                handle_new_command(i);
             }
         }
     }
+}
+
+void TcpServer::handle_new_connection() {
+    auto client = accept();
+    if (!client)
+        return;
+    std::cout << "Client connected on port " << port_ << "\n";
+    int current_fd = client->fd();
+    poll_fds_.push_back({current_fd, POLLIN, 0});
+    clients_[current_fd] = std::make_shared<Connection>(std::move(*client));
+}
+
+void TcpServer::handle_new_command(size_t& poll_fds_idx) {
+    auto client_connection = clients_[poll_fds_[poll_fds_idx].fd];
+    Command command;
+    try { // Parse
+        std::string line = client_connection->read_line();
+        command = Protocol::parse(line);
+
+    } catch (const ProtocolError& e) { // Typo etc
+        client_connection->write(Protocol::format_error(e.what()));
+        return;
+
+    } catch (const IOError& e) { // Connection/IO problem
+        std::cout << e.what() << "\n";
+        // swap & pop to remove dead connection in O(1)
+        std::swap(poll_fds_[poll_fds_idx], poll_fds_.back());
+        poll_fds_.pop_back();
+        poll_fds_idx--;
+        return;
+    }
+    task_deque_.push_back(Task{client_connection, command});
 }
 
 void TcpServer::stop() {

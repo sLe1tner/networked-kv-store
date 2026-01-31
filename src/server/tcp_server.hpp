@@ -67,8 +67,10 @@ private:
     std::atomic<bool> listening_{false};
     uint16_t port_{0};
 
-    void handle_client(Connection &conn);
-    void accept_loop();
+    // Reactor event loop
+    void run_reactor();
+    void handle_new_connection();
+    void handle_new_command(size_t& poll_fds_idx);
 
     // thread pool
     size_t num_workers_{5};
