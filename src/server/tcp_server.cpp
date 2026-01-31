@@ -15,7 +15,7 @@ namespace kv {
 
 
 void TcpServer::start() {
-    if (listening_)
+    if (running_)
         throw std::runtime_error("Server is already listening");
 
     int fd = ::socket(AF_INET, SOCK_STREAM, 0);
@@ -39,24 +39,24 @@ void TcpServer::start() {
         throw std::runtime_error("Listen failed");
 
     std::signal(SIGPIPE, SIG_IGN); // ignore SIGPIPE
-
+    s_this_server = this;
     // Register the signal handler (SIGINT)
-    s_instance_waker = &waker_;
     std::signal(SIGINT, signal_handler);
 
     poll_fds_.push_back({listen_socket_.fd(), POLLIN, 0}); // The server listening socket
     poll_fds_.push_back({waker_.read_fd(), POLLIN, 0}); // The read-end of the self-pipe
-    listening_ = true;
+    running_ = true;
 
     setup_workers();
     run_reactor();
+    s_this_server = nullptr;
     stop();
 }
 
 void TcpServer::run_reactor() {
-    while (listening_) {
+    while (running_) {
+        set_poll_fd_flags();
         int activity = poll(poll_fds_.data(), poll_fds_.size(), -1); // Block until a FD is ready
-
         if (activity < 0) {
             if (errno == EINTR) // interrupted syscall, eg: SIGWINCH or SIGCONT
                 continue;
@@ -64,25 +64,80 @@ void TcpServer::run_reactor() {
         }
 
         for (size_t i = 0; i < poll_fds_.size(); i++) {
-            if (!poll_fds_[i].revents & POLLIN) // Nothing on that fd
+            // Nothing on current fd
+            if (poll_fds_[i].revents == 0)
                 continue;
-            if (poll_fds_[i].fd == waker_.read_fd()) { // SIGINT
-                waker_.clear();
-                return;
-            } else if (poll_fds_[i].fd == listen_socket_.fd()) {
-                handle_new_connection();
-            } else {
+
+            // Waker poke
+            if (poll_fds_[i].fd == waker_.read_fd()) {
+                if (poll_fds_[i].revents & POLLIN)
+                    waker_.clear();
+                continue;
+            }
+
+            // New client
+            if (poll_fds_[i].fd == listen_socket_.fd()) {
+                if (poll_fds_[i].revents & POLLIN)
+                    handle_new_connection();
+                continue;
+            }
+
+            // Read from client
+            if (poll_fds_[i].revents & POLLIN) {
                 handle_new_command(i);
+            }
+
+            // Write to client
+            if (poll_fds_[i].revents & POLLOUT) {
+                handle_client_write(i);
+            }
+
+            // Handle errors (Disconnects)
+            if (poll_fds_[i].revents & (POLLERR | POLLHUP)) {
+                handle_client_dc(i);
             }
         }
     }
 }
 
+void TcpServer::set_poll_fd_flags() {
+    for (auto& poll_fd : poll_fds_) {
+        if (poll_fd.fd == waker_.read_fd() || poll_fd.fd == listen_socket_.fd())
+            continue;
+
+        auto it = clients_.find(poll_fd.fd);
+        if (it != clients_.end() && it->second->has_pending_data()) {
+            poll_fd.events = POLLIN | POLLOUT;
+        } else {
+            poll_fd.events = POLLIN;
+        }
+    }
+}
+
+void TcpServer::handle_client_write(size_t& poll_fds_idx) {
+    auto client_connection = clients_[poll_fds_[poll_fds_idx].fd];
+    client_connection->write_from_outbox();
+}
+
+void TcpServer::handle_client_dc(size_t& poll_fds_idx) {
+    int fd = poll_fds_[poll_fds_idx].fd;
+    clients_.erase(fd);
+
+    // swap & pop to remove dead connection in O(1)
+    if (poll_fds_idx < poll_fds_.size() - 1)
+        std::swap(poll_fds_[poll_fds_idx], poll_fds_.back());
+    poll_fds_.pop_back();
+    poll_fds_idx--;
+
+    std::cout << "Client [" << fd << "] disconnected\n";
+}
+
+
 void TcpServer::handle_new_connection() {
     auto client = accept();
     if (!client)
         return;
-    std::cout << "Client connected on port " << port_ << "\n";
+    std::cout << "Client [" << client->fd() << "] connected on port " << port_ << "\n";
     int current_fd = client->fd();
     poll_fds_.push_back({current_fd, POLLIN, 0});
     clients_[current_fd] = std::make_shared<Connection>(std::move(*client));
@@ -90,32 +145,42 @@ void TcpServer::handle_new_connection() {
 
 void TcpServer::handle_new_command(size_t& poll_fds_idx) {
     auto client_connection = clients_[poll_fds_[poll_fds_idx].fd];
-    Command command;
-    try { // Parse
-        std::string line = client_connection->read_line();
-        command = Protocol::parse(line);
 
-    } catch (const ProtocolError& e) { // Typo etc
-        client_connection->write(Protocol::format_error(e.what()));
-        return;
+    try {
+        // Pull data from the OS into our buffer
+        if (!client_connection->read_to_inbox()) {
+            handle_client_dc(poll_fds_idx);
+            return;
+        }
 
-    } catch (const IOError& e) { // Connection/IO problem
-        std::cout << e.what() << "\n";
-        // swap & pop to remove dead connection in O(1)
-        std::swap(poll_fds_[poll_fds_idx], poll_fds_.back());
-        poll_fds_.pop_back();
-        poll_fds_idx--;
-        return;
+        // See if we have one (or more) full commands
+        while (auto line = client_connection->try_get_line()) {
+            try {
+                Command cmd = Protocol::parse(*line);
+
+                // Push to worker pool
+                task_deque_.push_back(Task{
+                    .connection = client_connection,
+                    .cmd = cmd,
+                    .on_complete = [this]() { this->waker_.notify(); }
+                });
+            } catch (const ProtocolError& e) {
+                client_connection->append_response(Protocol::format_error(e.what()));
+            }
+        }
+    } catch (const IOError& e) {
+        handle_client_dc(poll_fds_idx);
     }
-    task_deque_.push_back(Task{client_connection, command});
 }
 
 void TcpServer::stop() {
-    if (!listening_)
+    // Compare and Swap (atomic transaction) to prevent double-shutdown logic
+    bool expected = true;
+    if (!running_.compare_exchange_strong(expected, false)) {
         return;
-
+    }
+    waker_.notify();
     // stop accepting new clients
-    listening_ = false;
     if (listen_socket_.valid())
         listen_socket_ = Socket{}; // destroy old socket, closes FD
 
@@ -132,7 +197,7 @@ std::optional<Socket> TcpServer::accept() {
     );
 
     if (client_fd == -1) {
-        if (!listening_)
+        if (!running_)
             return std::nullopt; // expected shutdown
         throw std::runtime_error("accept() failed");
     }
@@ -140,8 +205,8 @@ std::optional<Socket> TcpServer::accept() {
     return Socket{client_fd};
 }
 
-bool TcpServer::is_listening() const noexcept {
-    return listening_;
+bool TcpServer::is_running() const noexcept {
+    return running_;
 }
 
 void TcpServer::worker_loop(std::stop_token stop_token) {

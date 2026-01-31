@@ -19,15 +19,18 @@
 #include <poll.h>
 #include <map>
 
+#include <iostream>
 namespace kv {
-
 
 struct Task {
     std::shared_ptr<Connection> connection;
     Command cmd;
+    std::function<void()> on_complete; // Reactor poke callback
     void execute(KvStore& store) {
         std::string response = CommandDispatcher::execute(cmd, store);
-        connection->write(response);
+        connection->append_response(response);
+        if (on_complete)
+            on_complete();
     };
 };
 
@@ -59,20 +62,23 @@ public:
     std::optional<Socket> accept();
 
     // Returns true if the server is listening.
-    bool is_listening() const noexcept;
+    bool is_running() const noexcept;
 
 private:
     KvStore store_;
     Socket listen_socket_;
-    std::atomic<bool> listening_{false};
+    std::atomic<bool> running_{false};
     uint16_t port_{0};
 
     // Reactor event loop
     void run_reactor();
+    void set_poll_fd_flags();
     void handle_new_connection();
     void handle_new_command(size_t& poll_fds_idx);
+    void handle_client_write(size_t& poll_fds_idx);
+    void handle_client_dc(size_t& poll_fds_idx);
 
-    // thread pool
+    // Thread pool
     size_t num_workers_{5};
     std::deque<std::function<void()>> tasks_{};
     TaskDeque<Task> task_deque_;
@@ -82,12 +88,12 @@ private:
     void setup_workers();
     void worker_loop(std::stop_token stop_token);
 
-    // waker
+    // Waker
     Waker waker_;
-    inline static Waker* s_instance_waker = nullptr;
+    inline static TcpServer* s_this_server = nullptr; // used for waker callback in task
     static void signal_handler(int) {
-        if (s_instance_waker)
-            s_instance_waker->notify();
+        if (s_this_server)
+            s_this_server->stop();
     }
 
 };
