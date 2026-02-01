@@ -18,7 +18,7 @@ void TcpServer::start() {
     if (running_)
         throw std::runtime_error("Server is already listening");
 
-    int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    int fd = ::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
     if (fd == -1)
         throw std::runtime_error("Failed to create socket");
 
@@ -55,7 +55,7 @@ void TcpServer::start() {
 
 void TcpServer::run_reactor() {
     while (running_) {
-        set_poll_fd_flags();
+        apply_dirty_updates();
         int activity = poll(poll_fds_.data(), poll_fds_.size(), -1); // Block until a FD is ready
         if (activity < 0) {
             if (errno == EINTR) // interrupted syscall, eg: SIGWINCH or SIGCONT
@@ -100,38 +100,59 @@ void TcpServer::run_reactor() {
     }
 }
 
-void TcpServer::set_poll_fd_flags() {
-    for (auto& poll_fd : poll_fds_) {
-        if (poll_fd.fd == waker_.read_fd() || poll_fd.fd == listen_socket_.fd())
-            continue;
+void TcpServer::apply_dirty_updates() {
+    std::vector<int> local_dirty;
+    {
+        // Swap to a local vector to keep the lock time minimal
+        std::lock_guard lock(dirty_mutex_);
+        local_dirty.swap(dirty_fds_);
+    }
 
-        auto it = clients_.find(poll_fd.fd);
-        if (it != clients_.end() && it->second->has_pending_data()) {
-            poll_fd.events = POLLIN | POLLOUT;
-        } else {
-            poll_fd.events = POLLIN;
+    for (auto fd : local_dirty) {
+        auto it = fd_idx_map_.find(fd);
+        if (it != fd_idx_map_.end()) {
+            poll_fds_[it->second].events |= POLLOUT;
         }
     }
 }
 
+void TcpServer::mark_as_dirty(int fd) {
+    {
+        std::lock_guard lock(dirty_mutex_);
+        dirty_fds_.push_back(fd);
+    }
+    waker_.notify();
+}
+
 void TcpServer::handle_client_write(size_t& poll_fds_idx) {
-    auto client_connection = clients_[poll_fds_[poll_fds_idx].fd];
-    client_connection->write_from_outbox();
+    int fd = poll_fds_[poll_fds_idx].fd;
+    auto& client_connection = clients_[fd];
+
+    try {
+        if (!client_connection->write_from_outbox()) {  // if "everything has been written"
+            poll_fds_[poll_fds_idx].events &= ~POLLOUT; // Outbox empty, turn off POLLOUT
+        }
+    } catch (IOError&) {
+        handle_client_dc(poll_fds_idx);
+    }
 }
 
 void TcpServer::handle_client_dc(size_t& poll_fds_idx) {
-    int fd = poll_fds_[poll_fds_idx].fd;
-    clients_.erase(fd);
+    int moving_fd = poll_fds_.back().fd;
+    int dead_fd = poll_fds_[poll_fds_idx].fd;
 
     // swap & pop to remove dead connection in O(1)
-    if (poll_fds_idx < poll_fds_.size() - 1)
+    if (poll_fds_idx < poll_fds_.size() - 1) {
         std::swap(poll_fds_[poll_fds_idx], poll_fds_.back());
+        fd_idx_map_[moving_fd] = poll_fds_idx;
+    }
+    fd_idx_map_.erase(dead_fd);
+    clients_.erase(dead_fd);
     poll_fds_.pop_back();
     poll_fds_idx--;
 
-    std::cout << "Client [" << fd << "] disconnected\n";
+    std::cout << "Client [" << dead_fd << "] disconnected\n";
 }
-
 
 void TcpServer::handle_new_connection() {
     auto client = accept();
@@ -140,12 +161,13 @@ void TcpServer::handle_new_connection() {
     std::cout << "Client [" << client->fd() << "] connected on port " << port_ << "\n";
     int current_fd = client->fd();
     poll_fds_.push_back({current_fd, POLLIN, 0});
+    fd_idx_map_[current_fd] = poll_fds_.size() - 1;
     clients_[current_fd] = std::make_shared<Connection>(std::move(*client));
 }
 
 void TcpServer::handle_new_command(size_t& poll_fds_idx) {
+    int fd = poll_fds_[poll_fds_idx].fd;
     auto client_connection = clients_[poll_fds_[poll_fds_idx].fd];
-
     try {
         // Pull data from the OS into our buffer
         if (!client_connection->read_to_inbox()) {
@@ -157,15 +179,15 @@ void TcpServer::handle_new_command(size_t& poll_fds_idx) {
         while (auto line = client_connection->try_get_line()) {
             try {
                 Command cmd = Protocol::parse(*line);
-
                 // Push to worker pool
                 task_deque_.push_back(Task{
                     .connection = client_connection,
                     .cmd = cmd,
-                    .on_complete = [this]() { this->waker_.notify(); }
+                    .on_complete = [this, fd]() { mark_as_dirty(fd); }
                 });
             } catch (const ProtocolError& e) {
                 client_connection->append_response(Protocol::format_error(e.what()));
+                mark_as_dirty(fd);
             }
         }
     } catch (const IOError& e) {
@@ -188,21 +210,24 @@ void TcpServer::stop() {
 }
 
 std::optional<Socket> TcpServer::accept() {
-    sockaddr_in client_addr;
+    struct sockaddr_in client_addr;
     socklen_t client_len = sizeof(client_addr);
-    int client_fd = ::accept(
+
+    // Create non-blocking client socket
+    int client_fd = ::accept4(
         listen_socket_.fd(),
         reinterpret_cast<sockaddr*>(&client_addr),
-        &client_len
+        &client_len,
+        SOCK_NONBLOCK | SOCK_CLOEXEC
     );
 
-    if (client_fd == -1) {
-        if (!running_)
-            return std::nullopt; // expected shutdown
-        throw std::runtime_error("accept() failed");
+    if (client_fd < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK)
+            return std::nullopt;
+        throw std::runtime_error("Accept failed");
     }
 
-    return Socket{client_fd};
+     return Socket{client_fd};
 }
 
 bool TcpServer::is_running() const noexcept {

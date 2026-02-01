@@ -50,12 +50,14 @@ bool Connection::write_from_outbox() {
 
     // MSG_NOSIGNAL: don't SIGPIPE us if the socket is dead
     ssize_t n = ::send(socket_.fd(), outbox_.data(), outbox_.size(), MSG_NOSIGNAL);
-    if (n > 0) {
+    if (n >= 0) {
         outbox_.erase(0, n); // Remove what was actually sent
-    } else if (n < 0) {
-        throw IOError("write failed");
+        return !outbox_.empty();
     }
-    return !outbox_.empty();
+    // n < 0
+    if (errno == EAGAIN || errno == EWOULDBLOCK)
+        return true;
+    throw IOError("write failed");
 }
 
 

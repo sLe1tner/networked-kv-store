@@ -72,7 +72,6 @@ private:
 
     // Reactor event loop
     void run_reactor();
-    void set_poll_fd_flags();
     void handle_new_connection();
     void handle_new_command(size_t& poll_fds_idx);
     void handle_client_write(size_t& poll_fds_idx);
@@ -95,6 +94,14 @@ private:
         if (s_this_server)
             s_this_server->stop();
     }
+
+    // dirty list
+    std::mutex dirty_mutex_;
+    std::vector<int> dirty_fds_;
+    std::unordered_map<int, size_t> fd_idx_map_;
+
+    void mark_as_dirty(int fd);
+    void apply_dirty_updates();
 
 };
 
