@@ -7,6 +7,7 @@ add_library(kv_core
 
 target_include_directories(kv_core
     PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}
         ${PROJECT_SOURCE_DIR}/include
 )
 
