@@ -24,7 +24,6 @@ public:
     // append response to outbox
     void append_response(std::string data);
 
-    bool has_pending_data() const;
 
     // Write to client. Return true if there is still data left to send
     bool write_from_outbox();
@@ -35,13 +34,16 @@ public:
     // return line if we have a full one (ends in \n)
     std::optional<std::string> try_get_line();
 
+    // only used in tests to confirm partial reads/writes
+    bool inbox_has_data() const;
+    bool outbox_has_data() const;
 
 private:
     Socket socket_;
-    std::string outbox_;
+    std::string server_inbox_;
+    std::string server_outbox_;
     mutable std::mutex outbox_mutex_;
 
-    std::string inbox_;
 };
 
 } // namespace kv
