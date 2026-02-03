@@ -28,13 +28,14 @@ protected:
     }
 
     std::string client_reads() {
-        char c = 0;
         std::string data{};
-        for (size_t i = 0; c!= '\n' && i < 100; i++) {
-            if (read(client_fd_, &c, 1) <= 0)
-                return data;
-            data.push_back(c);
-            i++;
+        char buffer[4096];
+        ssize_t n = 1;
+
+        while ((n = read(client_fd_, buffer, 4096)) > 0) {
+            data.append(buffer, n);
+            if (n < 4096)
+                break;
         }
         return data;
     }
@@ -74,7 +75,7 @@ TEST_F(ConnectionTest, ReceiveEmptyLine) {
     // rest is handled by protocol, not connection
 }
 
-TEST_F(ConnectionTest, MessageLargerThanBuffer) {
+TEST_F(ConnectionTest, ReadMessageLargerThanBuffer) {
     size_t payload_size = 16 * 1024;
     std::string large_data(payload_size, 'A'); // 16KB of 'A's
     std::string full_command = "SET key " + large_data + "\n";
@@ -91,6 +92,18 @@ TEST_F(ConnectionTest, MessageLargerThanBuffer) {
     ASSERT_TRUE(result.has_value()) << "Failed to retrieve line after multiple reads";
     EXPECT_EQ(result.value().size(), full_command.size() - 1); // -1 for the \n
     EXPECT_EQ(result.value(), "SET key " + large_data);
+}
+
+TEST_F(ConnectionTest, WriteLargeMessage) {
+    size_t payload_size = 16 * 1024;
+    std::string large_data(payload_size, 'A'); // 16KB of 'A's
+    std::string full_response = "$" + large_data + "\n";
+
+    connection->append_response(full_response);
+    EXPECT_TRUE(connection->outbox_has_data());
+    EXPECT_FALSE(connection->write_from_outbox());
+    EXPECT_EQ(client_reads(), full_response);
+    EXPECT_FALSE(connection->outbox_has_data());
 }
 
 TEST_F(ConnectionTest, WriteResponseToClient) {
