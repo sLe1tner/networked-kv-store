@@ -38,16 +38,19 @@ Command Protocol::parse(std::string_view line) {
 }
 
 Command Protocol::parse_tokens(const std::vector<std::string_view>& tokens) {
-    const auto& cmd = tokens[0];
+    std::string cmd{tokens[0]};
+    std::transform(cmd.begin(), cmd.end(), cmd.begin(), [](unsigned char c) {
+        return std::tolower(c);
+    });
 
-    if (cmd == "GET") {
+    if (cmd == "get") {
         if (tokens.size() != 2)
             throw ProtocolError{"GET requires exactly one argument"};
 
         return Get{ std::string{tokens[1]} };
     }
 
-    if (cmd == "SET") {
+    if (cmd == "set") {
         if (tokens.size() != 3)
             throw ProtocolError{"SET requires exactly two arguments"};
 
@@ -57,7 +60,7 @@ Command Protocol::parse_tokens(const std::vector<std::string_view>& tokens) {
         };
     }
 
-    if (cmd == "DEL") {
+    if (cmd == "del") {
         if (tokens.size() != 2)
             throw ProtocolError{"DEL requires exactly one argument"};
 
