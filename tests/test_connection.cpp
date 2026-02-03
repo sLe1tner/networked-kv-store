@@ -62,6 +62,14 @@ TEST_F(ConnectionTest, MultipleCommandsInOneMessage) {
     EXPECT_EQ(connection->try_get_line(), "GET key");
 }
 
+TEST_F(ConnectionTest, MultipleCommandsInOneMessageCRLF) {
+    client_sends("SET key value\r\nGET key\r\n");
+    connection->read_to_inbox();
+    EXPECT_TRUE(connection->inbox_has_data());
+    EXPECT_EQ(connection->try_get_line(), "SET key value\r");
+    EXPECT_EQ(connection->try_get_line(), "GET key\r");
+}
+
 TEST_F(ConnectionTest, ReadConnectionClosed) {
     close(client_fd_);
     EXPECT_FALSE(connection->read_to_inbox());
