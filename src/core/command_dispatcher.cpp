@@ -22,6 +22,8 @@ std::string CommandDispatcher::execute(const Command& command, KvStore& store) {
             return success ?
                 Protocol::format_ok() :
                 Protocol::format_error("key not found");
+        } else if constexpr (std::is_same_v<T, Ping>) {
+            return Protocol::format_value("Pong");
         }
     }, command);
 }

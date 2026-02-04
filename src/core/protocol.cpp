@@ -67,6 +67,12 @@ Command Protocol::parse_tokens(const std::vector<std::string_view>& tokens) {
         return Del{ std::string{tokens[1]} };
     }
 
+    if (cmd == "ping") {
+        if (tokens.size() != 1)
+            throw ProtocolError{"PING requires exactly zero argument"};
+        return Ping{ };
+    }
+
     throw ProtocolError{"unknown command"};
 }
 
