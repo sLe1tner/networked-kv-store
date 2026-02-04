@@ -11,8 +11,9 @@
  * block until shutdown
  */
 
-int main() {
-    kv::TcpServer server{12345};
+int main(int argc, char* argv[]) {
+    uint16_t port = argc > 1 ? std::stoi(argv[1]) : 12345;
+    kv::TcpServer server{port};
     try {
         server.start();
     } catch (const std::exception& e) {
