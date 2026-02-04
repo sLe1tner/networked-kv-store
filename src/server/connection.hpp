@@ -14,6 +14,10 @@ public:
     explicit IOError(const std::string& msg) : std::runtime_error(msg) {}
 };
 
+class BufferOverflowError : public IOError {
+    using IOError::IOError;
+};
+
 /*
  * Represents a single client connection.
  */
@@ -39,6 +43,7 @@ public:
     bool outbox_has_data() const;
 
 private:
+    static constexpr size_t MAX_INBOX_SIZE = 1024 * 64; // 64KB limit
     Socket socket_;
     std::string server_inbox_;
     std::string server_outbox_;

@@ -190,6 +190,9 @@ void TcpServer::handle_new_command(size_t& poll_fds_idx) {
                 mark_as_dirty(fd);
             }
         }
+    } catch (const BufferOverflowError& e) {
+        client_connection->append_response(Protocol::format_error(e.what()));
+        mark_as_dirty(fd);
     } catch (const IOError& e) {
         handle_client_dc(poll_fds_idx);
     }

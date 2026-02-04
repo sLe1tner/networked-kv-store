@@ -16,6 +16,10 @@ bool Connection::read_to_inbox() {
             return true; // No data left to read
         throw IOError{"read failed"};
     }
+    if (server_inbox_.size() + n > MAX_INBOX_SIZE) {
+        server_inbox_.clear();
+        throw BufferOverflowError{"value too large"};
+    }
 
     server_inbox_.append(buffer, n);
     return true;
