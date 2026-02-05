@@ -28,6 +28,8 @@ struct Task {
     std::function<void()> on_complete; // Reactor poke callback
     void execute(KvStore& store) {
         std::string response = CommandDispatcher::execute(cmd, store);
+        if (response.empty())
+            return;
         connection->append_response(response);
         if (on_complete)
             on_complete();

@@ -179,6 +179,8 @@ void TcpServer::handle_new_command(size_t& poll_fds_idx) {
         while (auto line = client_connection->try_get_line()) {
             try {
                 Command cmd = Protocol::parse(*line);
+                if (std::holds_alternative<NoOp>(cmd))
+                    continue;
                 // Push to worker pool
                 task_deque_.push_back(Task{
                     .connection = client_connection,

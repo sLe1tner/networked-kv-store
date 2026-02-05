@@ -29,7 +29,10 @@ struct Del {
 struct Ping {
 };
 
-using Command = std::variant<Get, Set, Del, Ping>;
+struct NoOp {
+};
+
+using Command = std::variant<Get, Set, Del, Ping, NoOp>;
 
 /*
  * Parses and formats protocol messages.

@@ -31,7 +31,7 @@ Command Protocol::parse(std::string_view line) {
     }
 
     if (tokens.empty()) {
-        throw ProtocolError{"empty command"};
+        return NoOp{ };
     }
 
     return parse_tokens(tokens);
