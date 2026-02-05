@@ -23,4 +23,36 @@ find_package(Threads REQUIRED)
 
 enable_testing()
 add_subdirectory(src)
-add_subdirectory(tests)
+
+# Add unit test subdirectory
+add_subdirectory(tests/unit)
+
+# Add Python Integration Tests
+find_package(Python3 COMPONENTS Interpreter)
+
+if(Python3_Interpreter_FOUND)
+    # Check if pytest is actually installed in the Python environment
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE} -m pytest --version
+        RESULT_VARIABLE PYTEST_NOT_FOUND
+        OUTPUT_QUIET
+        ERROR_QUIET
+    )
+
+    if(PYTEST_NOT_FOUND EQUAL 0)
+        # Get the path to server executable target
+        set(SERVER_EXE_PATH $<TARGET_FILE:kv_server>)
+        # This creates a test named "Integration" that runs pytest
+        add_test(NAME Integration
+            COMMAND ${CMAKE_COMMAND} -E env "KV_SERVER_BIN=${SERVER_EXE_PATH}"
+                    ${Python3_EXECUTABLE} -m pytest
+                    # Use quotes to ensure it handles spaces correctly
+                    "${CMAKE_SOURCE_DIR}/tests/integration"
+                    ${EXTRA_ARGS}
+        )
+    else()
+        message(WARNING "Pytest not found. Integration tests will be skipped. "
+                        "Install it with: pip install pytest")
+
+    endif()
+endif()

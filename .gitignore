@@ -2,6 +2,10 @@
 /build
 /cmake-build-*/
 
+# Pytest
+__pycache__
+.pytest_cache
+
 # CMake generated files
 CMakeCache.txt
 CMakeFiles/

@@ -117,8 +117,14 @@ TEST(ProtocolTest, DelTooManyParameters) {
 // Other
 
 TEST(ProtocolTest, EmptyInput) {
-    EXPECT_THROW(Protocol::parse(""), ProtocolError);
-    EXPECT_THROW(Protocol::parse("   "), ProtocolError);
+    Command result1 = Protocol::parse("");
+    Command result2 = Protocol::parse("   ");
+
+    NoOp* noop_cmd1 = std::get_if<NoOp>(&result1);
+    NoOp* noop_cmd2 = std::get_if<NoOp>(&result2);
+
+    ASSERT_TRUE(noop_cmd1);
+    ASSERT_TRUE(noop_cmd2);
 }
 
 TEST(ProtocolTest, RejectUnknownCommand) {
