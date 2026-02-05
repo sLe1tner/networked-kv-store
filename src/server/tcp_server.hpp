@@ -75,9 +75,9 @@ private:
     // Reactor event loop
     void run_reactor();
     void handle_new_connection();
-    void handle_new_command(size_t& poll_fds_idx);
-    void handle_client_write(size_t& poll_fds_idx);
-    void handle_client_dc(size_t& poll_fds_idx);
+    void handle_new_command(int& poll_fds_idx);
+    void handle_client_write(int& poll_fds_idx);
+    void handle_client_dc(int& poll_fds_idx);
 
     // Thread pool
     size_t num_workers_{5};

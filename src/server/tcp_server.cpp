@@ -63,10 +63,16 @@ void TcpServer::run_reactor() {
             break;
         }
 
-        for (size_t i = 0; i < poll_fds_.size(); i++) {
+        for (int i = static_cast<int>(poll_fds_.size()) - 1; i >= 0; --i) {
             // Nothing on current fd
             if (poll_fds_[i].revents == 0)
                 continue;
+
+            // Handle errors (Disconnects)
+            if (poll_fds_[i].revents & (POLLERR | POLLHUP | POLLNVAL)) {
+                handle_client_dc(i);
+                continue;
+            }
 
             // Waker poke
             if (poll_fds_[i].fd == waker_.read_fd()) {
@@ -85,16 +91,12 @@ void TcpServer::run_reactor() {
             // Read from client
             if (poll_fds_[i].revents & POLLIN) {
                 handle_new_command(i);
+                continue;
             }
 
             // Write to client
             if (poll_fds_[i].revents & POLLOUT) {
                 handle_client_write(i);
-            }
-
-            // Handle errors (Disconnects)
-            if (poll_fds_[i].revents & (POLLERR | POLLHUP)) {
-                handle_client_dc(i);
             }
         }
     }
@@ -124,7 +126,7 @@ void TcpServer::mark_as_dirty(int fd) {
     waker_.notify();
 }
 
-void TcpServer::handle_client_write(size_t& poll_fds_idx) {
+void TcpServer::handle_client_write(int& poll_fds_idx) {
     int fd = poll_fds_[poll_fds_idx].fd;
     auto& client_connection = clients_[fd];
 
@@ -137,20 +139,19 @@ void TcpServer::handle_client_write(size_t& poll_fds_idx) {
     }
 }
 
-void TcpServer::handle_client_dc(size_t& poll_fds_idx) {
+void TcpServer::handle_client_dc(int& poll_fds_idx) {
     int moving_fd = poll_fds_.back().fd;
     int dead_fd = poll_fds_[poll_fds_idx].fd;
 
     // swap & pop to remove dead connection in O(1)
-    if (poll_fds_idx < poll_fds_.size() - 1) {
+    if (poll_fds_idx < static_cast<int>(poll_fds_.size()) - 1) {
         std::swap(poll_fds_[poll_fds_idx], poll_fds_.back());
         fd_idx_map_[moving_fd] = poll_fds_idx;
     }
     fd_idx_map_.erase(dead_fd);
     clients_.erase(dead_fd);
     poll_fds_.pop_back();
-    poll_fds_idx--;
-
+    ::close(dead_fd);
     std::cout << "Client [" << dead_fd << "] disconnected\n";
 }
 
@@ -165,7 +166,7 @@ void TcpServer::handle_new_connection() {
     clients_[current_fd] = std::make_shared<Connection>(std::move(*client));
 }
 
-void TcpServer::handle_new_command(size_t& poll_fds_idx) {
+void TcpServer::handle_new_command(int& poll_fds_idx) {
     int fd = poll_fds_[poll_fds_idx].fd;
     auto client_connection = clients_[poll_fds_[poll_fds_idx].fd];
     try {
