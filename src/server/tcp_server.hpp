@@ -41,9 +41,7 @@ struct Task {
     };
 };
 
-/*
- * TCP server skeleton.
- */
+
 class TcpServer {
 public:
     explicit TcpServer(uint16_t port, size_t num_workers = 5)
@@ -61,14 +59,13 @@ public:
     // Throws std::runtime_error on failure.
     void start();
 
-    // Stop listening (closes socket).
+    // Stop listening (closes socket), stop workers
     void stop();
 
     // Accept a new client connection.
-    // Blocks until a client connects.
     std::optional<Socket> accept();
 
-    // Returns true if the server is listening.
+    // Returns true if the server is running.
     bool is_running() const noexcept;
 
 private:
