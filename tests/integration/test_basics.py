@@ -61,7 +61,7 @@ def test_large_value(kv_server):
 
 def test_to_large_value(kv_server):
     host, port = kv_server
-    payload = "A" * (1024 * 1024 * 5) # 5MB, max is currently set to 64KB
+    payload = "A" * (1024 * 1024 * 5) # 5MB, max is currently set to 2MB
     resp = send_cmd(host, port, f"SET big_key {payload}\n")
     assert "value too large" in resp
 

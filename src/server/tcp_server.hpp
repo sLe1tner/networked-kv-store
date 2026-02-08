@@ -23,16 +23,21 @@
 namespace kv {
 
 struct Task {
-    std::shared_ptr<Connection> connection;
+    std::weak_ptr<Connection> connection;
     Command cmd;
     std::function<void()> on_complete; // Reactor poke callback
     void execute(KvStore& store) {
-        std::string response = CommandDispatcher::execute(cmd, store);
-        if (response.empty())
-            return;
-        connection->append_response(response);
-        if (on_complete)
-            on_complete();
+        if (auto client = connection.lock()) {
+            std::string response = CommandDispatcher::execute(cmd, store);
+            if (response.empty())
+                return;
+            client->append_response(response);
+            if (on_complete)
+                on_complete();
+        } else {
+            // The Reactor already deleted this connection
+            std::cout << "[Worker] Skipping task: Client already disconnected." << std::endl;
+        }
     };
 };
 

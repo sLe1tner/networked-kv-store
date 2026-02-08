@@ -24,7 +24,7 @@ protected:
     }
 
     void client_sends(const std::string& data) {
-        write(client_fd_, data.data(), data.size());
+         [[maybe_unused]] ssize_t _ = write(client_fd_, data.data(), data.size());
     }
 
     std::string client_reads() {

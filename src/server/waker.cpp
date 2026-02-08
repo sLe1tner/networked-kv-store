@@ -23,7 +23,7 @@ int Waker::read_fd() const {
 
 void Waker::notify() {
     char c = 'x';
-    write(pipe_fds_[1], &c, 1);
+    [[maybe_unused]] ssize_t _ = write(pipe_fds_[1], &c, 1);
 }
 
 void Waker::clear() {
