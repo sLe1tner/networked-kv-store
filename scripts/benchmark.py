@@ -104,9 +104,9 @@ if __name__ == "__main__":
 
     current_results = [
         # Baseline: 1 client
-        run_concurrent_test(HOST, PORT, "Serial SET", "SET key val\n", num_clients=1, req_per_client=5000),
+        run_concurrent_test(HOST, PORT, "Serial SET", f"SET key {'v' * 200 * 1024}\n", num_clients=1, req_per_client=5000),
         # Contention test: 10 clients
-        run_concurrent_test(HOST, PORT, "Concurrent SET", "SET key val\n", num_clients=10, req_per_client=1000),
+        run_concurrent_test(HOST, PORT, "Concurrent SET", f"SET key {'v' * 200 * 1024}\n", num_clients=10, req_per_client=1000),
         # Read-heavy test
         run_concurrent_test(HOST, PORT, "Concurrent GET", "GET key\n", num_clients=10, req_per_client=1000),
     ]
