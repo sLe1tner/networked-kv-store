@@ -1,4 +1,4 @@
-# C++ Multi-Threaded Key-Value Store
+# C++ Multi-Threaded Key-Value Store [![CI](https://github.com/sLe1tner/networked-kv-store/actions/workflows/ci.yml/badge.svg)](https://github.com/sLe1tner/networked-kv-store/actions/workflows/ci.yml)
 
 A high-performance, asynchronous Key-Value store built on a custom **Reactor Pattern** architecture. This project demonstrates modern C++ systems programming, focusing on non-blocking I/O, thread safety, and performance observability.
 
