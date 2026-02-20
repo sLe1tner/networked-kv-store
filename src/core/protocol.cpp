@@ -1,5 +1,6 @@
 #include "kv/protocol.hpp"
 #include <stdexcept>
+#include <algorithm>
 
 namespace kv {
 
