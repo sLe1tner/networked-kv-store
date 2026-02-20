@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        build_type: [Debug, Release]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y cmake ninja-build \
+                              g++ \
+                              python3 python3-pip
+
+      - name: Install Python integration test dependencies
+        run: |
+          pip3 install -r tests/integration/requirements.txt
+
+      - name: Configure CMake
+        run: |
+          cmake -S . -B build \
+                -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Run Tests (Unit + Integration)
+        run: ctest --test-dir build --output-on-failure
